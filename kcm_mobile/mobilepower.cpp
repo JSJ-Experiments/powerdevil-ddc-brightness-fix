@@ -9,9 +9,10 @@
 #include <KPluginFactory>
 #include <Kirigami/Platform/TabletModeWatcher>
 
-#include <Solid/Battery>
 #include <QDBusConnection>
 #include <QDBusPendingCall>
+#include <Solid/Battery>
+#include <qqml.h>
 
 #include <powerdevilenums.h>
 #include <powerdevilpowermanagement.h>
