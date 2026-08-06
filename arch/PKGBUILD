@@ -3,7 +3,7 @@
 
 pkgname=powerdevil
 pkgver=6.6.4
-pkgrel=3
+pkgrel=4
 pkgdesc='Manages the power consumption settings of a Plasma Shell (DDC brightness range guard)'
 arch=(x86_64)
 url='https://github.com/JadenJSJ/powerdevil-ddc-brightness-fix'
@@ -26,7 +26,7 @@ build() {
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_INSTALL_LIBEXECDIR=lib \
     -DBUILD_TESTING=OFF
-  cmake --build build
+  cmake --build build --parallel 4
 }
 
 package() {
