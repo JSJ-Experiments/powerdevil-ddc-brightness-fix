@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Interactive, reversible experiment for a monitor's out-of-range DDC/CI VCP 0x10 values.
+# It deliberately sends raw packets, bypassing ddcutil's brightness-range validation.
+set -euo pipefail
+
+BUS=0
+START=101
+
+usage() {
+    cat <<'USAGE'
+Usage: ddc-overflow-calibrate [--bus N] [--start N]
+
+Stops the user PowerDevil service while running, then sends raw DDC/CI VCP 0x10
+brightness values from 101 through 255 to the selected I2C bus. No monitor
+settings are saved. On exit it restores the original raw value and restarts
+PowerDevil if it was active.
+
+Keys (no Enter required):
+  =       increase the overflow test value by 1
+  -       decrease the overflow test value by 1 (minimum 101)
+  0       send normal raw brightness 0 (the laptop's baseline / OSD 16)
+  r       resend the raw brightness present when the script started
+  q/Esc   restore and quit
+USAGE
+}
+
+while (($#)); do
+    case $1 in
+    --bus)
+        BUS=${2:?--bus needs a number}
+        shift 2
+        ;;
+    --start)
+        START=${2:?--start needs a number}
+        shift 2
+        ;;
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    *)
+        printf 'Unknown option: %s\n' "$1" >&2
+        usage >&2
+        exit 2
+        ;;
+    esac
+done
+
+if ((START < 101 || START > 255)); then
+    printf '%s\n' '--start must be within 101..255' >&2
+    exit 2
+fi
+
+get_vcp() {
+    ddcutil --bus "$BUS" getvcp 10 --terse | awk '/^VCP 10 / { print $4 "/" $5; exit }'
+}
+
+# This is the raw DDC/CI Set VCP Feature packet. The checksum includes the
+# display's write address (0x6e), as required by DDC/CI. i2ctransfer sends the
+# packet directly, unlike `ddcutil setvcp`, which normalizes to the advertised
+# maximum before verifying the result.
+set_raw_vcp() {
+    local value=$1 hi lo checksum accepted
+    ((value >= 0 && value <= 65535)) || return 2
+    hi=$(( (value >> 8) & 0xff ))
+    lo=$(( value & 0xff ))
+    checksum=$(( 0x6e ^ 0x51 ^ 0x84 ^ 0x03 ^ 0x10 ^ hi ^ lo ))
+
+    sudo -n i2ctransfer -f -y "$BUS" w7@0x37 \
+        "$(printf '0x%02x' 0x51)" "$(printf '0x%02x' 0x84)" \
+        "$(printf '0x%02x' 0x03)" "$(printf '0x%02x' 0x10)" \
+        "$(printf '0x%02x' "$hi")" "$(printf '0x%02x' "$lo")" \
+        "$(printf '0x%02x' "$checksum")"
+    sleep 0.15
+    accepted=$(get_vcp || printf 'unreadable')
+    printf '%s\trequested=%s\treported=%s\n' "$(date --iso-8601=seconds)" "$value" "$accepted" >> "$log_file"
+    printf '\rraw request %3d; monitor reports %s.  [=/- test, 0 baseline, r restore, q quit]    ' "$value" "$accepted"
+}
+
+if ! sudo -v; then
+    printf '%s\n' 'sudo authentication is required for the raw I2C test.' >&2
+    exit 1
+fi
+
+original=$(get_vcp | cut -d/ -f1)
+if [[ ! $original =~ ^[0-9]+$ ]]; then
+    printf '%s\n' 'Could not read VCP 0x10 from the selected monitor.' >&2
+    exit 1
+fi
+
+state_dir=${XDG_STATE_HOME:-$HOME/.local/state}
+mkdir -p "$state_dir"
+log_file="$state_dir/powerdevil-ddc-overflow-calibration.tsv"
+printf '# %s bus=%s original=%s start=%s\n' "$(date --iso-8601=seconds)" "$BUS" "$original" "$START" >> "$log_file"
+
+service_was_active=false
+if systemctl --user is-active --quiet plasma-powerdevil.service; then
+    service_was_active=true
+fi
+
+saved_stty=$(stty -g)
+cleanup() {
+    stty "$saved_stty" 2>/dev/null || true
+    printf '\nRestoring raw brightness %s...\n' "$original"
+    set_raw_vcp "$original" >/dev/null 2>&1 || true
+    if $service_was_active; then
+        systemctl --user start plasma-powerdevil.service || true
+    fi
+}
+trap cleanup EXIT INT TERM
+
+printf '%s\n' 'Stopping PowerDevil for exclusive control during this reversible experiment...'
+systemctl --user stop plasma-powerdevil.service
+printf '%s\n' 'Testing starts at raw 101. Press 0 to compare against normal raw 0 (OSD 16).'
+printf '%s\n' 'Warning: some values can cause abrupt brightness changes; q restores the original level.'
+
+overflow_value=$START
+set_raw_vcp "$overflow_value"
+stty -echo -icanon time 0 min 0
+while :; do
+    IFS= read -rsn1 key
+    case $key in
+    '=')
+        if ((overflow_value < 255)); then
+            ((++overflow_value))
+        fi
+        set_raw_vcp "$overflow_value"
+        ;;
+    '-')
+        if ((overflow_value > 101)); then
+            ((--overflow_value))
+        fi
+        set_raw_vcp "$overflow_value"
+        ;;
+    0)
+        set_raw_vcp 0
+        ;;
+    r|R)
+        set_raw_vcp "$original"
+        ;;
+    q|Q|$'\e')
+        break
+        ;;
+    esac
+done
