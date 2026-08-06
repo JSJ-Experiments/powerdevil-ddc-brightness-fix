@@ -5,20 +5,20 @@
 set -euo pipefail
 
 BUS=0
-START=101
+START=25
 
 usage() {
     cat <<'USAGE'
 Usage: ddc-overflow-calibrate [--bus N] [--start N]
 
 Stops the user PowerDevil service while running, then sends raw DDC/CI VCP 0x10
-brightness values from 101 through 255 to the selected I2C bus. No monitor
+brightness values from 0 through 255 to the selected I2C bus. No monitor
 settings are saved. On exit it restores the original raw value and restarts
 PowerDevil if it was active.
 
 Keys (no Enter required):
   =       increase the overflow test value by 1
-  -       decrease the overflow test value by 1 (minimum 101)
+  -       decrease the test value by 1 (minimum 0)
   0       send normal raw brightness 0 (the laptop's baseline / OSD 16)
   r       resend the raw brightness present when the script started
   q/Esc   restore and quit
@@ -47,8 +47,8 @@ while (($#)); do
     esac
 done
 
-if ((START < 101 || START > 255)); then
-    printf '%s\n' '--start must be within 101..255' >&2
+if ((START < 0 || START > 255)); then
+    printf '%s\n' '--start must be within 0..255' >&2
     exit 2
 fi
 
@@ -112,7 +112,7 @@ trap cleanup EXIT INT TERM
 
 printf '%s\n' 'Stopping PowerDevil for exclusive control during this reversible experiment...'
 systemctl --user stop plasma-powerdevil.service
-printf '%s\n' 'Testing starts at raw 101. Press 0 to compare against normal raw 0 (OSD 16).'
+printf '%s\n' 'Testing starts at raw 25. Press 0 to compare against normal raw 0 (OSD 16).'
 printf '%s\n' 'Warning: some values can cause abrupt brightness changes; q restores the original level.'
 
 overflow_value=$START
@@ -128,7 +128,7 @@ while :; do
         set_raw_vcp "$overflow_value"
         ;;
     '-')
-        if ((overflow_value > 101)); then
+        if ((overflow_value > 0)); then
             ((--overflow_value))
         fi
         set_raw_vcp "$overflow_value"
