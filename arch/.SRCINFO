@@ -1,7 +1,7 @@
 pkgbase = powerdevil
 	pkgdesc = Manages the power consumption settings of a Plasma Shell (DDC brightness range guard)
 	pkgver = 6.6.4
-	pkgrel = 8
+	pkgrel = 9
 	url = https://github.com/JSJ-Experiments/powerdevil-ddc-brightness-fix
 	arch = x86_64
 	groups = plasma
@@ -41,7 +41,7 @@ pkgbase = powerdevil
 	optdepends = kinfocenter: for the Energy Information KCM
 	optdepends = power-profiles-daemon: power profiles support
 	optdepends = tlp: alternative power profiles support
-	source = powerdevil::git+https://github.com/JSJ-Experiments/powerdevil-ddc-brightness-fix.git#commit=fc081bcf47344a59da1c4fa49d606ed4702ce74a
+	source = powerdevil::git+https://github.com/JSJ-Experiments/powerdevil-ddc-brightness-fix.git#commit=e55ce051fcec7063d6c0e2d16d3a7869a49c53d9
 	sha256sums = SKIP
 
 pkgname = powerdevil
