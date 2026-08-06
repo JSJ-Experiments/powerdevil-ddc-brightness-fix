@@ -9,6 +9,7 @@
 
 #include <powerdevil_debug.h>
 
+#include <algorithm>
 #include <chrono>
 #include <span>
 
@@ -16,6 +17,32 @@ using namespace std::chrono_literals;
 
 constexpr std::chrono::milliseconds s_setBrightnessDelay = 1s;
 constexpr std::array<std::chrono::milliseconds, 3> s_backoffRetryIntervals = {1s, 2s, 3s};
+
+// For monitors or compositors with an incorrect DDC brightness scale, these
+// optional environment variables make it possible to experiment without a
+// rebuild. For example, INPUT_MAX=255 and OUTPUT_MAX=100 maps 0..255 input to
+// the monitor's 0..100 VCP range. An unset INPUT_MAX keeps the native mapping.
+constexpr auto s_inputMaxEnv = "POWERDEVIL_DDC_BRIGHTNESS_INPUT_MAX";
+constexpr auto s_outputMaxEnv = "POWERDEVIL_DDC_BRIGHTNESS_OUTPUT_MAX";
+
+int positiveEnvironmentValue(const char *name)
+{
+    bool ok = false;
+    const int value = qEnvironmentVariableIntValue(name, &ok);
+    return ok && value > 0 ? value : 0;
+}
+
+int mappedBrightness(int value, int monitorMaxBrightness)
+{
+    const int outputMax = std::min(monitorMaxBrightness, positiveEnvironmentValue(s_outputMaxEnv));
+    const int targetMax = outputMax > 0 ? outputMax : monitorMaxBrightness;
+    const int inputMax = positiveEnvironmentValue(s_inputMaxEnv);
+
+    if (inputMax > 0) {
+        return std::clamp(qRound(std::clamp(value, 0, inputMax) * (targetMax / static_cast<double>(inputMax))), 0, targetMax);
+    }
+    return std::clamp(value, 0, targetMax);
+}
 
 #ifdef WITH_DDCUTIL
 constexpr DDCA_Vcp_Feature_Code BRIGHTNESS_VCP_FEATURE_CODE = 0x10;
@@ -200,10 +227,9 @@ void DDCutilDisplay::setBrightness(int value, bool allowAnimations)
         // particular, negative values would otherwise be encoded as 0xffff
         // and values above the monitor maximum can trigger undefined OSD
         // behaviour on non-conforming DDC/CI implementations.
-        const int boundedValue = std::clamp(value, 0, m_maxBrightness);
+        const int boundedValue = mappedBrightness(value, m_maxBrightness);
         if (value != boundedValue) {
-            qCWarning(POWERDEVIL) << "Out-of-range DDC/CI brightness request for" << m_label << value << "; clamping to" << boundedValue << "/"
-                                  << m_maxBrightness;
+            qCWarning(POWERDEVIL) << "DDC/CI brightness request for" << m_label << value << "mapped to" << boundedValue << "/" << m_maxBrightness;
         }
         m_retryCounter = 0;
         m_timer->start(s_setBrightnessDelay);
@@ -250,18 +276,30 @@ void BrightnessWorker::ddcSetBrightness(int value, DDCutilDisplay *display)
             qCWarning(POWERDEVIL) << "[DDCutilDisplay]: ddca_open_display2" << status;
         } else {
             int currentBrightness = -1;
+            int hardwareMaxBrightness = -1;
             DDCA_Non_Table_Vcp_Value vcpValue;
             if (status = ddca_get_non_table_vcp_value(displayHandle, BRIGHTNESS_VCP_FEATURE_CODE, &vcpValue); status != DDCRC_OK) {
                 qCWarning(POWERDEVIL) << "[DDCutilDisplay]: ddca_get_non_table_vcp_value" << status;
             } else {
                 currentBrightness = vcpValue.sh << 8 | vcpValue.sl;
+                hardwareMaxBrightness = vcpValue.mh << 8 | vcpValue.ml;
             }
 
-            if (value == currentBrightness) {
-                qCDebug(POWERDEVIL) << "[DDCutilDisplay]:" << display->m_label << "hardware brightness already at" << value;
+            // The monitor is the authority for its usable VCP range. Re-read
+            // it immediately before a write: some monitors return a stale or
+            // corrupt maximum during detection, and accepting that value can
+            // put their OSD into an out-of-range state.
+            const int boundedValue = mappedBrightness(value, std::max(0, hardwareMaxBrightness));
+            if (value != boundedValue) {
+                qCWarning(POWERDEVIL) << "DDC/CI brightness request for" << display->m_label << value << "mapped to" << boundedValue << "/"
+                                      << hardwareMaxBrightness;
+            }
+
+            if (boundedValue == currentBrightness) {
+                qCDebug(POWERDEVIL) << "[DDCutilDisplay]:" << display->m_label << "hardware brightness already at" << boundedValue;
             } else {
-                uint8_t sh = value >> 8 & 0xff;
-                uint8_t sl = value & 0xff;
+                uint8_t sh = boundedValue >> 8 & 0xff;
+                uint8_t sl = boundedValue & 0xff;
 
                 if (status = ddca_set_non_table_vcp_value(displayHandle, BRIGHTNESS_VCP_FEATURE_CODE, sh, sl); status != DDCRC_OK) {
                     qCWarning(POWERDEVIL) << "[DDCutilDisplay]: ddca_set_non_table_vcp_value" << status;

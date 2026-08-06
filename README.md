@@ -88,3 +88,29 @@ Set up a KDE development environment [as described in the developer documentatio
 Restart using systemd (or your init system of choice) as mentioned earlier. Use system log messages and attach gdb to the running session for further debugging.
 
 PowerDevil ships with KAuth helpers, which have to be configured on a system-wide basis. If you need to change these helpers, consult MRs [!1715](https://invent.kde.org/plasma/plasma-workspace/-/merge_requests/1715) and/or [!3705](https://invent.kde.org/plasma/plasma-workspace/-/merge_requests/3705) in plasma-workspace for possible ways to enable their development builds on your system.
+
+### DDC/CI brightness range experiments
+
+PowerDevil always verifies the monitor's VCP 0x10 maximum immediately before it
+writes a value, so it never sends a value outside the monitor's current DDC/CI
+range. For a monitor or compositor that uses the wrong *input* scale, the
+following optional environment variables can remap it without rebuilding:
+
+- `POWERDEVIL_DDC_BRIGHTNESS_INPUT_MAX`: input scale to expect.
+- `POWERDEVIL_DDC_BRIGHTNESS_OUTPUT_MAX`: highest VCP 0x10 value to send.
+
+For example, if a compositor sends `0..255` but `ddcutil getvcp 10` reports a
+monitor maximum of `100`, set input max to `255` and output max to `100`. Add a
+user-service drop-in at
+`~/.config/systemd/user/plasma-powerdevil.service.d/ddc-brightness.conf`:
+
+```ini
+[Service]
+Environment=POWERDEVIL_DDC_BRIGHTNESS_INPUT_MAX=255
+Environment=POWERDEVIL_DDC_BRIGHTNESS_OUTPUT_MAX=100
+```
+
+Then apply it with `systemctl --user daemon-reload` and
+`systemctl --user restart plasma-powerdevil.service`. Leave `INPUT_MAX` unset
+to retain the monitor's native scale. The active process logs every remapped
+request to the `org_kde_powerdevil` user journal.
