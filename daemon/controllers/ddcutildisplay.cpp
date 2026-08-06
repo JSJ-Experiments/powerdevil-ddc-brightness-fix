@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <span>
 
 using namespace std::chrono_literals;
@@ -27,6 +28,9 @@ constexpr std::array<std::chrono::milliseconds, 3> s_backoffRetryIntervals = {1s
 // A global variable remains a backwards-compatible fallback.
 constexpr auto s_inputMaxEnv = "POWERDEVIL_DDC_BRIGHTNESS_INPUT_MAX";
 constexpr auto s_outputMaxEnv = "POWERDEVIL_DDC_BRIGHTNESS_OUTPUT_MAX";
+constexpr auto s_wrapMinEnv = "POWERDEVIL_DDC_BRIGHTNESS_WRAP_MIN";
+constexpr auto s_wrapMaxEnv = "POWERDEVIL_DDC_BRIGHTNESS_WRAP_MAX";
+constexpr auto s_wrapGammaEnv = "POWERDEVIL_DDC_BRIGHTNESS_WRAP_GAMMA";
 
 QByteArray perDisplayEnvironmentSuffix(const QByteArray &edid)
 {
@@ -55,11 +59,41 @@ int positiveEnvironmentValue(const char *globalName, const QByteArray &edid)
     return ok && globalValue > 0 ? globalValue : 0;
 }
 
+double positiveEnvironmentDouble(const char *globalName, const QByteArray &edid)
+{
+    auto valueForName = [](const char *name) {
+        bool ok = false;
+        const double value = qgetenv(name).toDouble(&ok);
+        return ok && value > 0.0 ? value : 0.0;
+    };
+
+    const QByteArray perDisplayName = perDisplayEnvironmentName(globalName, edid);
+    if (const double perDisplayValue = valueForName(perDisplayName.constData()); perDisplayValue > 0.0) {
+        return perDisplayValue;
+    }
+    return valueForName(globalName);
+}
+
 int mappedBrightness(int value, int monitorMaxBrightness, const QByteArray &edid)
 {
     const int outputMax = std::min(monitorMaxBrightness, positiveEnvironmentValue(s_outputMaxEnv, edid));
     const int targetMax = outputMax > 0 ? outputMax : monitorMaxBrightness;
     const int inputMax = positiveEnvironmentValue(s_inputMaxEnv, edid);
+    const int wrapMin = positiveEnvironmentValue(s_wrapMinEnv, edid);
+    const int wrapMax = positiveEnvironmentValue(s_wrapMaxEnv, edid);
+
+    // Some non-conforming monitors have a second, dimmer brightness segment
+    // immediately after their configured normal maximum. Keep the whole
+    // sequence within the VCP maximum, but make the segment join explicit:
+    // wrapMin..wrapMax, then 0..targetMax. This is per-display and opt-in.
+    if (inputMax > 0 && wrapMin > targetMax && wrapMax >= wrapMin && wrapMax <= monitorMaxBrightness) {
+        const int wrapCount = wrapMax - wrapMin + 1;
+        const int fullCount = wrapCount + targetMax + 1;
+        const double gamma = positiveEnvironmentDouble(s_wrapGammaEnv, edid);
+        const double normalizedValue = std::clamp(value, 0, inputMax) / static_cast<double>(inputMax);
+        const int sequenceIndex = std::clamp(qRound(std::pow(normalizedValue, gamma > 0.0 ? gamma : 1.0) * (fullCount - 1)), 0, fullCount - 1);
+        return sequenceIndex < wrapCount ? wrapMin + sequenceIndex : sequenceIndex - wrapCount;
+    }
 
     if (inputMax > 0) {
         return std::clamp(qRound(std::clamp(value, 0, inputMax) * (targetMax / static_cast<double>(inputMax))), 0, targetMax);

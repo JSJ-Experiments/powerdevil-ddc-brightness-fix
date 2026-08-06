@@ -96,7 +96,9 @@ write. For a monitor or compositor with an incorrect brightness scale, optional
 environment variables can remap it without rebuilding:
 
 - `POWERDEVIL_DDC_BRIGHTNESS_INPUT_MAX`: input scale to expect.
-- `POWERDEVIL_DDC_BRIGHTNESS_OUTPUT_MAX`: highest VCP 0x10 value to send.
+- `POWERDEVIL_DDC_BRIGHTNESS_OUTPUT_MAX`: highest normal VCP 0x10 value to send.
+- `POWERDEVIL_DDC_BRIGHTNESS_WRAP_MIN` and `POWERDEVIL_DDC_BRIGHTNESS_WRAP_MAX`: an optional dimmer wrapped segment following the normal range.
+- `POWERDEVIL_DDC_BRIGHTNESS_WRAP_GAMMA`: optional curve for that combined sequence; `1` is linear by VCP step.
 
 A global variable applies to **every** DDC/CI monitor. Prefer a per-display
 variable instead: append `_EDID_<SHA256>` to either name, where `<SHA256>` is
@@ -113,6 +115,20 @@ For example, a display whose logged suffix is
 [Service]
 Environment=POWERDEVIL_DDC_BRIGHTNESS_INPUT_MAX_EDID_ABCDEF...=100
 Environment=POWERDEVIL_DDC_BRIGHTNESS_OUTPUT_MAX_EDID_ABCDEF...=35
+```
+
+If this monitor has an additional dim segment at `36..60`, enable the
+per-display wrap sequence instead. A `0..100` slider then follows
+`36..60, 0..35`: raw 36 is the slider minimum, raw 60 joins the normal zero
+point, and raw 35 remains the maximum.
+
+```ini
+[Service]
+Environment=POWERDEVIL_DDC_BRIGHTNESS_INPUT_MAX_EDID_ABCDEF...=100
+Environment=POWERDEVIL_DDC_BRIGHTNESS_OUTPUT_MAX_EDID_ABCDEF...=35
+Environment=POWERDEVIL_DDC_BRIGHTNESS_WRAP_MIN_EDID_ABCDEF...=36
+Environment=POWERDEVIL_DDC_BRIGHTNESS_WRAP_MAX_EDID_ABCDEF...=60
+Environment=POWERDEVIL_DDC_BRIGHTNESS_WRAP_GAMMA_EDID_ABCDEF...=1
 ```
 
 Add this to
