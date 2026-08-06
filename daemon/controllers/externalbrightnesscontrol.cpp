@@ -5,6 +5,7 @@
 */
 #include "externalbrightnesscontrol.h"
 #include "displaybrightness.h"
+#include <powerdevil_debug.h>
 
 #include <limits>
 
