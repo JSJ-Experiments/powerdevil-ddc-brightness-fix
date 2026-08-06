@@ -91,26 +91,33 @@ PowerDevil ships with KAuth helpers, which have to be configured on a system-wid
 
 ### DDC/CI brightness range experiments
 
-PowerDevil always verifies the monitor's VCP 0x10 maximum immediately before it
-writes a value, so it never sends a value outside the monitor's current DDC/CI
-range. For a monitor or compositor that uses the wrong *input* scale, the
-following optional environment variables can remap it without rebuilding:
+PowerDevil verifies the monitor's VCP 0x10 maximum immediately before each
+write. For a monitor or compositor with an incorrect brightness scale, optional
+environment variables can remap it without rebuilding:
 
 - `POWERDEVIL_DDC_BRIGHTNESS_INPUT_MAX`: input scale to expect.
 - `POWERDEVIL_DDC_BRIGHTNESS_OUTPUT_MAX`: highest VCP 0x10 value to send.
 
-For example, if a compositor sends `0..255` but `ddcutil getvcp 10` reports a
-monitor maximum of `100`, set input max to `255` and output max to `100`. Add a
-user-service drop-in at
-`~/.config/systemd/user/plasma-powerdevil.service.d/ddc-brightness.conf`:
+A global variable applies to **every** DDC/CI monitor. Prefer a per-display
+variable instead: append `_EDID_<SHA256>` to either name, where `<SHA256>` is
+the uppercase SHA-256 fingerprint of the display's first 128-byte EDID block.
+PowerDevil writes that suffix to the `org_kde_powerdevil` user journal when it
+detects the display. This lets a workaround apply only to the affected monitor,
+even if another monitor is attached later.
+
+For example, a display whose logged suffix is
+`EDID_ABCDEF...` can be constrained to its stable `0..35` range while keeping a
+`0..100` laptop slider:
 
 ```ini
 [Service]
-Environment=POWERDEVIL_DDC_BRIGHTNESS_INPUT_MAX=255
-Environment=POWERDEVIL_DDC_BRIGHTNESS_OUTPUT_MAX=100
+Environment=POWERDEVIL_DDC_BRIGHTNESS_INPUT_MAX_EDID_ABCDEF...=100
+Environment=POWERDEVIL_DDC_BRIGHTNESS_OUTPUT_MAX_EDID_ABCDEF...=35
 ```
 
-Then apply it with `systemctl --user daemon-reload` and
-`systemctl --user restart plasma-powerdevil.service`. Leave `INPUT_MAX` unset
-to retain the monitor's native scale. The active process logs every remapped
-request to the `org_kde_powerdevil` user journal.
+Add this to
+`~/.config/systemd/user/plasma-powerdevil.service.d/ddc-brightness.conf`, then
+apply it with `systemctl --user daemon-reload` and
+`systemctl --user restart plasma-powerdevil.service`. If neither the per-display
+nor global input maximum is set, PowerDevil retains the monitor's native scale.
+Every remapped request is logged to the `org_kde_powerdevil` user journal.

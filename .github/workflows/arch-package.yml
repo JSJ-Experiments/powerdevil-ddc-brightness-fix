@@ -1,0 +1,28 @@
+name: Build Arch package
+
+on:
+  push:
+    branches: [ddc-brightness-range-guard]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Arch build requirements
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --needed --noconfirm base-devel git
+      - name: Build package
+        working-directory: arch
+        run: makepkg -C -f --noconfirm --syncdeps --nocheck
+      - uses: actions/upload-artifact@v4
+        with:
+          name: powerdevil-arch-package
+          path: arch/*.pkg.tar.zst
+          if-no-files-found: error

@@ -9,6 +9,8 @@
 
 #include <powerdevil_debug.h>
 
+#include <QCryptographicHash>
+
 #include <algorithm>
 #include <chrono>
 #include <span>
@@ -20,23 +22,44 @@ constexpr std::array<std::chrono::milliseconds, 3> s_backoffRetryIntervals = {1s
 
 // For monitors or compositors with an incorrect DDC brightness scale, these
 // optional environment variables make it possible to experiment without a
-// rebuild. For example, INPUT_MAX=255 and OUTPUT_MAX=100 maps 0..255 input to
-// the monitor's 0..100 VCP range. An unset INPUT_MAX keeps the native mapping.
+// rebuild. Per-display variables are preferred: append `_EDID_<SHA256>` to a
+// variable name, where the SHA-256 identifies the display's first EDID block.
+// A global variable remains a backwards-compatible fallback.
 constexpr auto s_inputMaxEnv = "POWERDEVIL_DDC_BRIGHTNESS_INPUT_MAX";
 constexpr auto s_outputMaxEnv = "POWERDEVIL_DDC_BRIGHTNESS_OUTPUT_MAX";
 
-int positiveEnvironmentValue(const char *name)
+QByteArray perDisplayEnvironmentSuffix(const QByteArray &edid)
 {
-    bool ok = false;
-    const int value = qEnvironmentVariableIntValue(name, &ok);
-    return ok && value > 0 ? value : 0;
+    if (edid.isEmpty()) {
+        return {};
+    }
+    return "EDID_" + QCryptographicHash::hash(edid, QCryptographicHash::Sha256).toHex().toUpper();
 }
 
-int mappedBrightness(int value, int monitorMaxBrightness)
+QByteArray perDisplayEnvironmentName(const char *baseName, const QByteArray &edid)
 {
-    const int outputMax = std::min(monitorMaxBrightness, positiveEnvironmentValue(s_outputMaxEnv));
+    const QByteArray suffix = perDisplayEnvironmentSuffix(edid);
+    return suffix.isEmpty() ? QByteArray() : QByteArray(baseName) + '_' + suffix;
+}
+
+int positiveEnvironmentValue(const char *globalName, const QByteArray &edid)
+{
+    bool ok = false;
+    const QByteArray perDisplayName = perDisplayEnvironmentName(globalName, edid);
+    const int perDisplayValue = qEnvironmentVariableIntValue(perDisplayName.constData(), &ok);
+    if (ok && perDisplayValue > 0) {
+        return perDisplayValue;
+    }
+
+    const int globalValue = qEnvironmentVariableIntValue(globalName, &ok);
+    return ok && globalValue > 0 ? globalValue : 0;
+}
+
+int mappedBrightness(int value, int monitorMaxBrightness, const QByteArray &edid)
+{
+    const int outputMax = std::min(monitorMaxBrightness, positiveEnvironmentValue(s_outputMaxEnv, edid));
     const int targetMax = outputMax > 0 ? outputMax : monitorMaxBrightness;
-    const int inputMax = positiveEnvironmentValue(s_inputMaxEnv);
+    const int inputMax = positiveEnvironmentValue(s_inputMaxEnv, edid);
 
     if (inputMax > 0) {
         return std::clamp(qRound(std::clamp(value, 0, inputMax) * (targetMax / static_cast<double>(inputMax))), 0, targetMax);
@@ -78,6 +101,11 @@ DDCutilDisplay::DDCutilDisplay(DDCA_Display_Ref displayRef, QMutex *openDisplayM
     std::ranges::copy(std::span(displayInfo->edid_bytes, 128), std::back_inserter(m_edidData));
 
     ddca_free_display_info(displayInfo);
+
+    const QByteArray rangeSuffix = perDisplayEnvironmentSuffix(m_edidData);
+    if (!rangeSuffix.isEmpty()) {
+        qCInfo(POWERDEVIL) << "[DDCutilDisplay]:" << m_label << "per-display DDC brightness range suffix:" << rangeSuffix;
+    }
 
     // Remaining parts in init(), which can be retried if supportsBrightness() is still false
     init();
@@ -289,7 +317,7 @@ void BrightnessWorker::ddcSetBrightness(int value, DDCutilDisplay *display)
             // it immediately before a write: some monitors return a stale or
             // corrupt maximum during detection, and accepting that value can
             // put their OSD into an out-of-range state.
-            const int boundedValue = mappedBrightness(value, std::max(0, hardwareMaxBrightness));
+            const int boundedValue = mappedBrightness(value, std::max(0, hardwareMaxBrightness), display->m_edidData);
             if (value != boundedValue) {
                 qCWarning(POWERDEVIL) << "DDC/CI brightness request for" << display->m_label << value << "mapped to" << boundedValue << "/"
                                       << hardwareMaxBrightness;
