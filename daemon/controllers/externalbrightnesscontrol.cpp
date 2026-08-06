@@ -6,6 +6,8 @@
 #include "externalbrightnesscontrol.h"
 #include "displaybrightness.h"
 
+#include <algorithm>
+
 static constexpr uint32_t s_version = 3;
 
 ExternalBrightnessController::ExternalBrightnessController()
@@ -62,7 +64,16 @@ ExternalBrightnessControl::~ExternalBrightnessControl()
 
 void ExternalBrightnessControl::kde_external_brightness_device_v1_requested_brightness(uint32_t value)
 {
-    m_display->setBrightness(value, false);
+    // The Wayland protocol uses an unsigned 32-bit value, while DDC/CI accepts
+    // only the range reported by the monitor. Do not allow a malformed or stale
+    // compositor request to wrap during conversion to int and reach the monitor.
+    const uint32_t maxBrightness = std::max(0, m_display->maxBrightness());
+    const uint32_t boundedValue = std::min(value, maxBrightness);
+    if (value != boundedValue) {
+        qCWarning(POWERDEVIL) << "Ignoring out-of-range external brightness request" << value << "for" << m_display->label() << "; clamping to" << boundedValue
+                              << "/" << maxBrightness;
+    }
+    m_display->setBrightness(static_cast<int>(boundedValue), false);
 }
 
 #include "moc_externalbrightnesscontrol.cpp"

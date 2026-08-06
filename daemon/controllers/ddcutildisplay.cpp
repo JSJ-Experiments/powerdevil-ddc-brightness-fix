@@ -196,9 +196,18 @@ void DDCutilDisplay::setBrightness(int value, bool allowAnimations)
 {
 #ifdef WITH_DDCUTIL
     if (m_supportsBrightness) {
+        // Do not send values outside the range advertised by the monitor. In
+        // particular, negative values would otherwise be encoded as 0xffff
+        // and values above the monitor maximum can trigger undefined OSD
+        // behaviour on non-conforming DDC/CI implementations.
+        const int boundedValue = std::clamp(value, 0, m_maxBrightness);
+        if (value != boundedValue) {
+            qCWarning(POWERDEVIL) << "Out-of-range DDC/CI brightness request for" << m_label << value << "; clamping to" << boundedValue << "/"
+                                  << m_maxBrightness;
+        }
         m_retryCounter = 0;
         m_timer->start(s_setBrightnessDelay);
-        m_brightness = value;
+        m_brightness = boundedValue;
     }
 #endif
 }
