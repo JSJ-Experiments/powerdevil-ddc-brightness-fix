@@ -1,7 +1,7 @@
 pkgbase = powerdevil
 	pkgdesc = Manages the power consumption settings of a Plasma Shell (DDC brightness range guard)
 	pkgver = 6.6.4
-	pkgrel = 3
+	pkgrel = 4
 	url = https://github.com/JadenJSJ/powerdevil-ddc-brightness-fix
 	arch = x86_64
 	groups = plasma
