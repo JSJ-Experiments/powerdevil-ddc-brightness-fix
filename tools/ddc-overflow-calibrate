@@ -53,7 +53,7 @@ if ((START < 0 || START > 255)); then
 fi
 
 get_vcp() {
-    ddcutil --bus "$BUS" getvcp 10 --terse | awk '/^VCP 10 / { print $4 "/" $5; exit }'
+    timeout --foreground -k 1s 3s ddcutil --bus "$BUS" getvcp 10 --terse | awk '/^VCP 10 / { print $4 "/" $5; exit }'
 }
 
 # This is the raw DDC/CI Set VCP Feature packet. The checksum includes the
@@ -67,11 +67,16 @@ set_raw_vcp() {
     lo=$(( value & 0xff ))
     checksum=$(( 0x6e ^ 0x51 ^ 0x84 ^ 0x03 ^ 0x10 ^ hi ^ lo ))
 
-    sudo -n i2ctransfer -f -y "$BUS" w7@0x37 \
+    # A malformed monitor response can leave an I2C transaction blocked. Keep
+    # key handling recoverable instead of trapping the terminal in raw mode.
+    if ! timeout --foreground -k 1s 3s sudo -n i2ctransfer -f -y "$BUS" w7@0x37 \
         "$(printf '0x%02x' 0x51)" "$(printf '0x%02x' 0x84)" \
         "$(printf '0x%02x' 0x03)" "$(printf '0x%02x' 0x10)" \
         "$(printf '0x%02x' "$hi")" "$(printf '0x%02x' "$lo")" \
-        "$(printf '0x%02x' "$checksum")"
+        "$(printf '0x%02x' "$checksum")"; then
+        printf '\nRaw I2C write timed out or failed; press q to restore and quit.\n' >&2
+        return 1
+    fi
     sleep 0.15
     accepted=$(get_vcp || printf 'unreadable')
     printf '%s\trequested=%s\treported=%s\n' "$(date --iso-8601=seconds)" "$value" "$accepted" >> "$log_file"
@@ -116,7 +121,7 @@ printf '%s\n' 'Testing starts at raw 25. Press 0 to compare against normal raw 0
 printf '%s\n' 'Warning: some values can cause abrupt brightness changes; q restores the original level.'
 
 overflow_value=$START
-set_raw_vcp "$overflow_value"
+set_raw_vcp "$overflow_value" || true
 stty -echo -icanon time 0 min 0
 while :; do
     IFS= read -rsn1 key
@@ -125,19 +130,19 @@ while :; do
         if ((overflow_value < 255)); then
             ((++overflow_value))
         fi
-        set_raw_vcp "$overflow_value"
+        set_raw_vcp "$overflow_value" || true
         ;;
     '-')
         if ((overflow_value > 0)); then
             ((--overflow_value))
         fi
-        set_raw_vcp "$overflow_value"
+        set_raw_vcp "$overflow_value" || true
         ;;
     0)
-        set_raw_vcp 0
+        set_raw_vcp 0 || true
         ;;
     r|R)
-        set_raw_vcp "$original"
+        set_raw_vcp "$original" || true
         ;;
     q|Q|$'\e')
         break
