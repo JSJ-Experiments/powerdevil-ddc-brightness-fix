@@ -31,6 +31,7 @@ constexpr auto s_outputMaxEnv = "POWERDEVIL_DDC_BRIGHTNESS_OUTPUT_MAX";
 constexpr auto s_wrapMinEnv = "POWERDEVIL_DDC_BRIGHTNESS_WRAP_MIN";
 constexpr auto s_wrapMaxEnv = "POWERDEVIL_DDC_BRIGHTNESS_WRAP_MAX";
 constexpr auto s_wrapGammaEnv = "POWERDEVIL_DDC_BRIGHTNESS_WRAP_GAMMA";
+constexpr auto s_setDelayEnv = "POWERDEVIL_DDC_BRIGHTNESS_DELAY_MS";
 
 QByteArray perDisplayEnvironmentSuffix(const QByteArray &edid)
 {
@@ -57,6 +58,21 @@ int positiveEnvironmentValue(const char *globalName, const QByteArray &edid)
 
     const int globalValue = qEnvironmentVariableIntValue(globalName, &ok);
     return ok && globalValue > 0 ? globalValue : 0;
+}
+
+int nonNegativeEnvironmentValue(const char *globalName, const QByteArray &edid)
+{
+    auto valueForName = [](const char *name) {
+        bool ok = false;
+        const int value = qEnvironmentVariableIntValue(name, &ok);
+        return ok && value >= 0 ? value : -1;
+    };
+
+    const QByteArray perDisplayName = perDisplayEnvironmentName(globalName, edid);
+    if (const int perDisplayValue = valueForName(perDisplayName.constData()); perDisplayValue >= 0) {
+        return perDisplayValue;
+    }
+    return valueForName(globalName);
 }
 
 double positiveEnvironmentDouble(const char *globalName, const QByteArray &edid)
@@ -294,7 +310,11 @@ void DDCutilDisplay::setBrightness(int value, bool allowAnimations)
         // Mapping here as well would apply a configured scale twice.
         const int requestedValue = std::max(value, 0);
         m_retryCounter = 0;
-        m_timer->start(s_setBrightnessDelay);
+        // DDC/CI writes are slow enough that a one-second debounce is useful
+        // by default. Per-display delay 0 enables immediate writes; values
+        // around 100 ms are generally a responsive but non-flooding test.
+        const int configuredDelay = nonNegativeEnvironmentValue(s_setDelayEnv, m_edidData);
+        m_timer->start(configuredDelay >= 0 ? std::chrono::milliseconds(configuredDelay) : s_setBrightnessDelay);
         m_brightness = requestedValue;
     }
 #endif

@@ -99,6 +99,7 @@ environment variables can remap it without rebuilding:
 - `POWERDEVIL_DDC_BRIGHTNESS_OUTPUT_MAX`: highest normal VCP 0x10 value to send.
 - `POWERDEVIL_DDC_BRIGHTNESS_WRAP_MIN` and `POWERDEVIL_DDC_BRIGHTNESS_WRAP_MAX`: an optional dimmer wrapped segment following the normal range.
 - `POWERDEVIL_DDC_BRIGHTNESS_WRAP_GAMMA`: optional curve for that combined sequence; `1` is linear by VCP step.
+- `POWERDEVIL_DDC_BRIGHTNESS_DELAY_MS`: optional request debounce; `0` sends immediately, while `100` is a responsive starting point.
 
 A global variable applies to **every** DDC/CI monitor. Prefer a per-display
 variable instead: append `_EDID_<SHA256>` to either name, where `<SHA256>` is
