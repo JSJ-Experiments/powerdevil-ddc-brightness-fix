@@ -35,6 +35,7 @@ constexpr auto s_outputMaxEnv = "POWERDEVIL_DDC_BRIGHTNESS_OUTPUT_MAX";
 constexpr auto s_wrapMinEnv = "POWERDEVIL_DDC_BRIGHTNESS_WRAP_MIN";
 constexpr auto s_wrapMaxEnv = "POWERDEVIL_DDC_BRIGHTNESS_WRAP_MAX";
 constexpr auto s_wrapGammaEnv = "POWERDEVIL_DDC_BRIGHTNESS_WRAP_GAMMA";
+constexpr auto s_setDelayEnv = "POWERDEVIL_DDC_BRIGHTNESS_DELAY_MS";
 
 QByteArray perDisplayEnvironmentSuffix(const QByteArray &edid)
 {
@@ -61,6 +62,21 @@ int positiveEnvironmentValue(const char *globalName, const QByteArray &edid)
 
     const int globalValue = qEnvironmentVariableIntValue(globalName, &ok);
     return ok && globalValue > 0 ? globalValue : 0;
+}
+
+int nonNegativeEnvironmentValue(const char *globalName, const QByteArray &edid)
+{
+    auto valueForName = [](const char *name) {
+        bool ok = false;
+        const int value = qEnvironmentVariableIntValue(name, &ok);
+        return ok && value >= 0 ? value : -1;
+    };
+
+    const QByteArray perDisplayName = perDisplayEnvironmentName(globalName, edid);
+    if (const int perDisplayValue = valueForName(perDisplayName.constData()); perDisplayValue >= 0) {
+        return perDisplayValue;
+    }
+    return valueForName(globalName);
 }
 
 double positiveEnvironmentDouble(const char *globalName, const QByteArray &edid)
@@ -292,7 +308,9 @@ void DDCutilDisplay::setBrightness(int value)
         m_brightness = std::max(value, 0);
         m_pendingBrightness.reset();
         m_retryCounter = 0;
-        m_timer->start(s_initialWriteDelay);
+        // Use Plasma's default coalescing delay unless overridden for this display.
+        const int configuredDelay = nonNegativeEnvironmentValue(s_setDelayEnv, m_edidData);
+        m_timer->start(configuredDelay >= 0 ? std::chrono::milliseconds(configuredDelay) : s_initialWriteDelay);
     }
 #endif
 }
