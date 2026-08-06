@@ -227,13 +227,13 @@ void DDCutilDisplay::setBrightness(int value, bool allowAnimations)
         // particular, negative values would otherwise be encoded as 0xffff
         // and values above the monitor maximum can trigger undefined OSD
         // behaviour on non-conforming DDC/CI implementations.
-        const int boundedValue = mappedBrightness(value, m_maxBrightness);
-        if (value != boundedValue) {
-            qCWarning(POWERDEVIL) << "DDC/CI brightness request for" << m_label << value << "mapped to" << boundedValue << "/" << m_maxBrightness;
-        }
+        // Keep the original request until the worker reads the monitor's
+        // current maximum and maps it exactly once immediately before writing.
+        // Mapping here as well would apply a configured scale twice.
+        const int requestedValue = std::max(value, 0);
         m_retryCounter = 0;
         m_timer->start(s_setBrightnessDelay);
-        m_brightness = boundedValue;
+        m_brightness = requestedValue;
     }
 #endif
 }
