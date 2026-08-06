@@ -1,0 +1,34 @@
+# Maintainer: JadenJSJ <jadenjsj@proton.me>
+# Based on the Arch Linux powerdevil package.
+
+pkgname=powerdevil
+pkgver=6.6.4
+pkgrel=2
+pkgdesc='Manages the power consumption settings of a Plasma Shell (DDC brightness range guard)'
+arch=(x86_64)
+url='https://github.com/JadenJSJ/powerdevil-ddc-brightness-fix'
+license=(LGPL-2.0-or-later)
+depends=(ddcutil glibc plasma-activities kauth kcmutils kconfig kcoreaddons kcrash
+         kdbusaddons kglobalaccel ki18n kidletime kirigami kitemmodels knotifications
+         kpackage kservice kxmlgui libkscreen libplasma libstdc++ libxcb plasma-workspace
+         qcoro qt6-base qt6-declarative solid systemd-libs wayland)
+makedepends=(extra-cmake-modules kdoctools plasma-wayland-protocols)
+optdepends=('kinfocenter: for the Energy Information KCM'
+            'power-profiles-daemon: power profiles support'
+            'tlp: alternative power profiles support')
+groups=(plasma)
+_commit=352df62d4cc2d2d4c8d9c6922716db471b59cb6d
+source=("$pkgname::git+$url.git#commit=$_commit")
+sha256sums=('SKIP')
+
+build() {
+  cmake -B build -S "$srcdir/$pkgname" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBEXECDIR=lib \
+    -DBUILD_TESTING=OFF
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+}
