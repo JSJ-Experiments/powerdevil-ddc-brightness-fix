@@ -11,10 +11,17 @@
 #include <powerdevil_debug.h>
 
 #include <QMutex>
+#include <QTimer>
 
+#include <chrono>
 #include <map>
 #include <memory> // std::unique_ptr
 #include <span>
+
+using namespace std::chrono_literals;
+
+constexpr std::chrono::milliseconds s_initialFallbackRedetectDelay = 2s;
+constexpr std::chrono::milliseconds s_maxFallbackRedetectDelay = 30s;
 
 #ifdef WITH_DDCUTIL
 #include <ddcutil_c_api.h>
@@ -60,12 +67,18 @@ private Q_SLOTS:
     void removeDisplay(const QString &id);
 
 private:
+    void scheduleFallbackRedetect();
+
     std::map<QString, std::unique_ptr<DDCutilDisplay>> m_displays;
     std::map<QString, std::unique_ptr<DDCutilDisplay>> m_pendingDisplays;
     // ddcutil has global state, let's avoid simultaneous access to its open display map
     QMutex m_openDisplayMutex;
+    QTimer m_fallbackRedetectTimer;
+    std::chrono::milliseconds m_fallbackRedetectDelay = s_initialFallbackRedetectDelay;
     bool m_performedDetection = false;
     bool m_noDdcutil = false;
+    bool m_callbackRegistered = false;
+    bool m_displayWatchActive = false;
 };
 
 #if DDCUTIL_VERSION >= QT_VERSION_CHECK(2, 1, 0)
@@ -83,6 +96,9 @@ DDCutilPrivateSingleton &DDCutilPrivateSingleton::instance()
 
 DDCutilPrivateSingleton::DDCutilPrivateSingleton()
 {
+    m_fallbackRedetectTimer.setSingleShot(true);
+    connect(&m_fallbackRedetectTimer, &QTimer::timeout, this, &DDCutilPrivateSingleton::redetect);
+
     m_noDdcutil = qEnvironmentVariableIntValue("POWERDEVIL_NO_DDCUTIL") > 0;
     if (m_noDdcutil) {
         return;
@@ -102,15 +118,24 @@ DDCutilPrivateSingleton::DDCutilPrivateSingleton()
     }
 #endif
 #if DDCUTIL_VERSION >= QT_VERSION_CHECK(2, 1, 0)
-    if (ddca_register_display_status_callback(ddcaCallback)) {
-        qCWarning(POWERDEVIL) << "[DDCutilDetector]: Failed to initialize callback";
+    const DDCA_Status callbackStatus = ddca_register_display_status_callback(ddcaCallback);
+    if (callbackStatus != DDCRC_OK) {
+        qCWarning(POWERDEVIL) << "[DDCutilDetector]: Failed to initialize display-status callback:" << callbackStatus << ddca_rc_desc(callbackStatus)
+                              << "- falling back to redetection after a display disappears";
         return;
     }
+    m_callbackRegistered = true;
 
     connect(this, &DDCutilPrivateSingleton::displayAdded, this, &DDCutilPrivateSingleton::redetect);
     connect(this, &DDCutilPrivateSingleton::displayRemoved, this, &DDCutilPrivateSingleton::removeDisplay);
 
-    ddca_start_watch_displays(DDCA_Display_Event_Class(DDCA_EVENT_CLASS_ALL));
+    const DDCA_Status watchStatus = ddca_start_watch_displays(DDCA_Display_Event_Class(DDCA_EVENT_CLASS_ALL));
+    if (watchStatus != DDCRC_OK) {
+        qCWarning(POWERDEVIL) << "[DDCutilDetector]: Failed to watch display status:" << watchStatus << ddca_rc_desc(watchStatus)
+                              << "- falling back to redetection after a display disappears";
+        return;
+    }
+    m_displayWatchActive = true;
 #endif
 }
 
@@ -120,8 +145,12 @@ DDCutilPrivateSingleton::~DDCutilPrivateSingleton()
         return;
     }
 #if DDCUTIL_VERSION >= QT_VERSION_CHECK(2, 1, 0)
-    ddca_stop_watch_displays(false);
-    ddca_unregister_display_status_callback(ddcaCallback);
+    if (m_displayWatchActive) {
+        ddca_stop_watch_displays(false);
+    }
+    if (m_callbackRegistered) {
+        ddca_unregister_display_status_callback(ddcaCallback);
+    }
     disconnect(this, &DDCutilPrivateSingleton::displayAdded, this, &DDCutilPrivateSingleton::redetect);
     disconnect(this, &DDCutilPrivateSingleton::displayRemoved, this, &DDCutilPrivateSingleton::removeDisplay);
 #endif
@@ -175,7 +204,10 @@ void DDCutilPrivateSingleton::detect()
                 auto displayNode = m_pendingDisplays.extract(id);
                 if (success) {
                     m_displays.insert(std::move(displayNode));
+                    m_fallbackRedetectDelay = s_initialFallbackRedetectDelay;
                     Q_EMIT displaysChanged();
+                } else {
+                    scheduleFallbackRedetect();
                 }
             });
             m_pendingDisplays.emplace(id, std::move(display));
@@ -185,6 +217,13 @@ void DDCutilPrivateSingleton::detect()
 
         m_pendingDisplays.erase(id);
         m_displays.emplace(id, std::move(display));
+    }
+
+    if (!m_displays.empty()) {
+        m_fallbackRedetectDelay = s_initialFallbackRedetectDelay;
+        m_fallbackRedetectTimer.stop();
+    } else if (m_pendingDisplays.empty()) {
+        scheduleFallbackRedetect();
     }
 }
 
@@ -209,11 +248,25 @@ void DDCutilPrivateSingleton::redetect()
         detect();
     } else {
         qCCritical(POWERDEVIL) << "[DDCutilDetector]: Redetection failed";
+        scheduleFallbackRedetect();
     }
 
     if (!m_displays.empty() || !invalidDisplays.empty()) {
         Q_EMIT displaysChanged();
     }
+#endif
+}
+
+void DDCutilPrivateSingleton::scheduleFallbackRedetect()
+{
+#if DDCUTIL_VERSION >= QT_VERSION_CHECK(2, 1, 0)
+    if (m_displayWatchActive || m_noDdcutil || m_fallbackRedetectTimer.isActive()) {
+        return;
+    }
+
+    qCWarning(POWERDEVIL) << "[DDCutilDetector]: Scheduling fallback display redetection in" << m_fallbackRedetectDelay.count() << "milliseconds";
+    m_fallbackRedetectTimer.start(m_fallbackRedetectDelay);
+    m_fallbackRedetectDelay = std::min(m_fallbackRedetectDelay * 2, s_maxFallbackRedetectDelay);
 #endif
 }
 
@@ -243,6 +296,7 @@ void DDCutilPrivateSingleton::removeDisplay(const QString &id)
     if (auto deletedAfterEmit = m_displays.extract(id); !deletedAfterEmit.empty()) {
         qCDebug(POWERDEVIL) << "[DDCutilDetector]: Removing display" << id;
         Q_EMIT displaysChanged();
+        scheduleFallbackRedetect();
     } else {
         qCDebug(POWERDEVIL) << "[DDCutilDetector]: Failed to remove display" << id;
     }
