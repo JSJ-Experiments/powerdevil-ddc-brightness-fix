@@ -76,6 +76,12 @@ PowerDevil uses [(lib)ddcutil](https://github.com/rockowitz/ddcutil) to adjust b
 
 DDC/CI experiences can differ greatly among different monitor manufacturers and ddcutil is making the best of a complicated situation. Sometimes users can nonetheless run into issues with DDC/CI monitor support. If this happens and the power management service does not start correctly, Plasma as a whole will have trouble starting and functioning as intended.
 
+Some systems cannot start libddcutil's display-status watcher. PowerDevil then
+falls back to redetecting displays with an exponential delay whenever no usable
+DDC/CI display is present or one disappears after failed communication. This
+allows a brightness control to return after a monitor wakes from DPMS sleep,
+without requiring PowerDevil to be restarted manually.
+
 Instead of disabling the PowerDevil service altogether, you can disable merely its use of ddcutil by defining `POWERDEVIL_NO_DDCUTIL=1` as environment variable to your service configuration. Refer to the instructions for `QT_LOGGING_RULES` above for how to go about this. Aside from missing DDC/CI brightness controls, this will leave you with a working system until a fix can be found and deployed to your system.
 
 Advanced users who want to dig into ddcutil can specify a [`ddcutil/ddcutilrc` file in their config directory](http://www.ddcutil.com/config_file/), to change selected ddcutil options ([like these](http://www.ddcutil.com/performance_options/)) and/or enable extremely detailed [ddcutil tracing output](http://www.ddcutil.com/debug_options/). Chances are you'll need technical background knowledge and/or support from the ddcutil maintainer to get any useful fixes out of this. So let's just say that PowerDevil supports ddcutil config files, will apply the `[global]` and `[libddcutil]` config sections, and leave it at that.
