@@ -97,6 +97,13 @@ PowerDevil ships with KAuth helpers, which have to be configured on a system-wid
 
 ### DDC/CI brightness range experiments
 
+**Arch package compatibility:** PowerDevil installs compiled QML plugins that
+use Qt's private C++ ABI. Build the package on the system where it will be
+installed, or use a CI artifact only when its exact `qt6-base` and
+`qt6-declarative` package versions match that system. The Arch package now pins
+both build-time versions so `pacman` rejects incompatible binaries instead of
+breaking the battery and brightness tray applets. Rebuild after upgrading Qt.
+
 PowerDevil verifies the monitor's VCP 0x10 maximum immediately before each
 write. For a monitor or compositor with an incorrect brightness scale, optional
 environment variables can remap it without rebuilding:
