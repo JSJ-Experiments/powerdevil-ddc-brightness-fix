@@ -4,6 +4,11 @@ on:
   push:
     branches: [ddc-brightness-range-guard]
   workflow_dispatch:
+    inputs:
+      arch_snapshot:
+        description: 'Optional Arch Linux Archive date (YYYY-MM-DD) for a matching Qt build'
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -15,8 +20,18 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install Arch build requirements
+        env:
+          ARCH_SNAPSHOT: ${{ inputs.arch_snapshot }}
         run: |
-          pacman -Syu --noconfirm
+          case "$ARCH_SNAPSHOT" in
+            '') pacman -Syu --noconfirm ;;
+            [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+              snapshot_path=$(printf '%s' "$ARCH_SNAPSHOT" | tr '-' '/')
+              printf 'Server = https://archive.archlinux.org/repos/%s/$repo/os/$arch\n' "$snapshot_path" > /etc/pacman.d/mirrorlist
+              pacman -Syyuu --noconfirm
+              ;;
+            *) echo 'arch_snapshot must use YYYY-MM-DD' >&2; exit 1 ;;
+          esac
           pacman -S --needed --noconfirm base-devel git sudo
           useradd --create-home build
           echo 'build ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/build
