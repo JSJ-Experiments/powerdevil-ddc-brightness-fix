@@ -2,8 +2,8 @@
 # Based on the Arch Linux powerdevil package.
 
 pkgname=powerdevil
-pkgver=6.6.4
-pkgrel=14
+pkgver=6.8.2
+pkgrel=1.1
 pkgdesc='Manages the power consumption settings of a Plasma Shell (DDC brightness range guard)'
 arch=(x86_64)
 url='https://github.com/JSJ-Experiments/powerdevil-ddc-brightness-fix'
@@ -17,7 +17,7 @@ optdepends=('kinfocenter: for the Energy Information KCM'
             'power-profiles-daemon: power profiles support'
             'tlp: alternative power profiles support')
 groups=(plasma)
-_commit=e009ae5342ce2b913420880438abb861e9ddcf8c
+_commit=3a16322c424b4c58599b414fe66e7d077c19e6f6
 source=("$pkgname::git+$url.git#commit=$_commit")
 sha256sums=('SKIP')
 
