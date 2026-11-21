@@ -365,34 +365,27 @@ void BrightnessWorker::ddcSetBrightness(int value, DDCutilDisplay *display)
         if (status = ddca_open_display2(display->m_displayRef, true, &displayHandle); status != DDCRC_OK) {
             qCWarning(POWERDEVIL) << "[DDCutilDisplay]: ddca_open_display2" << status;
         } else {
-            int currentBrightness = -1;
-            int hardwareMaxBrightness = -1;
             DDCA_Non_Table_Vcp_Value vcpValue;
             if (status = ddca_get_non_table_vcp_value(displayHandle, BRIGHTNESS_VCP_FEATURE_CODE, &vcpValue); status != DDCRC_OK) {
                 qCWarning(POWERDEVIL) << "[DDCutilDisplay]: ddca_get_non_table_vcp_value" << status;
             } else {
-                currentBrightness = vcpValue.sh << 8 | vcpValue.sl;
-                hardwareMaxBrightness = vcpValue.mh << 8 | vcpValue.ml;
-            }
+                const int currentBrightness = vcpValue.sh << 8 | vcpValue.sl;
+                const int hardwareMaxBrightness = vcpValue.mh << 8 | vcpValue.ml;
+                // Only write after verifying the current VCP range.
+                const int boundedValue = mappedBrightness(value, hardwareMaxBrightness, display->m_edidData);
+                if (value != boundedValue) {
+                    qCWarning(POWERDEVIL) << "DDC/CI brightness request for" << display->m_label << value << "mapped to" << boundedValue << "/"
+                                          << hardwareMaxBrightness;
+                }
 
-            // The monitor is the authority for its usable VCP range. Re-read
-            // it immediately before a write: some monitors return a stale or
-            // corrupt maximum during detection, and accepting that value can
-            // put their OSD into an out-of-range state.
-            const int boundedValue = mappedBrightness(value, std::max(0, hardwareMaxBrightness), display->m_edidData);
-            if (value != boundedValue) {
-                qCWarning(POWERDEVIL) << "DDC/CI brightness request for" << display->m_label << value << "mapped to" << boundedValue << "/"
-                                      << hardwareMaxBrightness;
-            }
-
-            if (boundedValue == currentBrightness) {
-                qCDebug(POWERDEVIL) << "[DDCutilDisplay]:" << display->m_label << "hardware brightness already at" << boundedValue;
-            } else {
-                uint8_t sh = boundedValue >> 8 & 0xff;
-                uint8_t sl = boundedValue & 0xff;
-
-                if (status = ddca_set_non_table_vcp_value(displayHandle, BRIGHTNESS_VCP_FEATURE_CODE, sh, sl); status != DDCRC_OK) {
-                    qCWarning(POWERDEVIL) << "[DDCutilDisplay]: ddca_set_non_table_vcp_value" << status;
+                if (boundedValue == currentBrightness) {
+                    qCDebug(POWERDEVIL) << "[DDCutilDisplay]:" << display->m_label << "hardware brightness already at" << boundedValue;
+                } else {
+                    const uint8_t sh = boundedValue >> 8 & 0xff;
+                    const uint8_t sl = boundedValue & 0xff;
+                    if (status = ddca_set_non_table_vcp_value(displayHandle, BRIGHTNESS_VCP_FEATURE_CODE, sh, sl); status != DDCRC_OK) {
+                        qCWarning(POWERDEVIL) << "[DDCutilDisplay]: ddca_set_non_table_vcp_value" << status;
+                    }
                 }
             }
 
